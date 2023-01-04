@@ -22,6 +22,7 @@ fn vertex(p: [f32; 2], c: [f32; 3]) -> Vertex {
 
 struct Example {
     vertex_buf: wgpu::Buffer,
+    vert_count: u32,
     pipeline: wgpu::RenderPipeline,
 }
 
@@ -94,6 +95,7 @@ impl framework::Example for Example {
 
         Example {
             vertex_buf,
+            vert_count: vertices.len() as u32,
             pipeline,
         }
     }
@@ -140,7 +142,7 @@ impl framework::Example for Example {
             });
             rpass.set_pipeline(&self.pipeline);
             rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.draw(0..3, 0..1);
+            rpass.draw(0..self.vert_count, 0..1);
         }
 
         queue.submit(Some(encoder.finish()));

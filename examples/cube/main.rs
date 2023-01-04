@@ -83,28 +83,6 @@ fn create_texels(size: usize) -> Vec<u8> {
         .collect()
 }
 
-/// A wrapper for `pop_error_scope` futures that panics if an error occurs.
-///
-/// Given a future `inner` of an `Option<E>` for some error type `E`,
-/// wait for the future to be ready, and panic if its value is `Some`.
-///
-/// This can be done simpler with `FutureExt`, but we don't want to add
-/// a dependency just for this small case.
-struct ErrorFuture<F> {
-    inner: F,
-}
-impl<F: Future<Output = Option<wgpu::Error>>> Future for ErrorFuture<F> {
-    type Output = ();
-    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<()> {
-        let inner = unsafe { self.map_unchecked_mut(|me| &mut me.inner) };
-        inner.poll(cx).map(|error| {
-            if let Some(e) = error {
-                panic!("Rendering {}", e);
-            }
-        })
-    }
-}
-
 struct Example {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
@@ -128,10 +106,6 @@ impl Example {
 }
 
 impl framework::Example for Example {
-    fn optional_features() -> wgt::Features {
-        wgt::Features::POLYGON_MODE_LINE
-    }
-
     fn init(
         config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
@@ -358,9 +332,8 @@ impl framework::Example for Example {
         queue: &wgpu::Queue,
         spawner: &framework::Spawner,
     ) {
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -379,13 +352,10 @@ impl framework::Example for Example {
                 })],
                 depth_stencil_attachment: None,
             });
-            rpass.push_debug_group("Prepare data for draw.");
             rpass.set_pipeline(&self.pipeline);
             rpass.set_bind_group(0, &self.bind_group, &[]);
             rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.pop_debug_group();
-            rpass.insert_debug_marker("Draw!");
             rpass.draw_indexed(0..self.index_count as u32, 0, 0..1);
             if let Some(ref pipe) = self.pipeline_wire {
                 rpass.set_pipeline(pipe);
@@ -394,40 +364,9 @@ impl framework::Example for Example {
         }
 
         queue.submit(Some(encoder.finish()));
-
-        // If an error occurs, report it and panic.
-        spawner.spawn_local(ErrorFuture {
-            inner: device.pop_error_scope(),
-        });
     }
 }
 
 fn main() {
-    framework::run::<Example>("cube");
-}
-
-#[test]
-fn cube() {
-    framework::test::<Example>(framework::FrameworkRefTest {
-        image_path: "/examples/cube/screenshot.png",
-        width: 1024,
-        height: 768,
-        optional_features: wgpu::Features::default(),
-        base_test_parameters: framework::test_common::TestParameters::default(),
-        tolerance: 1,
-        max_outliers: 500, // Bounded by rpi4
-    });
-}
-
-#[test]
-fn cube_lines() {
-    framework::test::<Example>(framework::FrameworkRefTest {
-        image_path: "/examples/cube/screenshot-lines.png",
-        width: 1024,
-        height: 768,
-        optional_features: wgpu::Features::POLYGON_MODE_LINE,
-        base_test_parameters: framework::test_common::TestParameters::default(),
-        tolerance: 2,
-        max_outliers: 600, // Bounded by rpi4 on GL
-    });
+    framework::run::<Example>("Cube");
 }

@@ -976,7 +976,6 @@ dependencies = [
  "async-executor",
  "bytemuck",
  "glam",
- "log",
  "pollster",
  "wgpu",
  "wgpu-types",

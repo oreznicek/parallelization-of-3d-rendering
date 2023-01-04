@@ -5,22 +5,6 @@ use std::time::Instant;
 use std::future::Future;
 
 pub trait Example: 'static + Sized {
-    fn optional_features() -> wgpu::Features {
-        wgpu::Features::empty()
-    }
-    fn required_features() -> wgpu::Features {
-        wgpu::Features::empty()
-    }
-    fn required_downlevel_capabilities() -> wgpu::DownlevelCapabilities {
-        wgpu::DownlevelCapabilities {
-            flags: wgpu::DownlevelFlags::empty(),
-            shader_model: wgpu::ShaderModel::Sm5,
-            ..wgpu::DownlevelCapabilities::default()
-        }
-    }
-    fn required_limits() -> wgpu::Limits {
-        wgpu::Limits::downlevel_webgl2_defaults() // These downlevel limits will allow the code to run on all possible hardware
-    }
     fn init(
         config: &wgpu::SurfaceConfiguration,
         adapter: &wgpu::Adapter,
@@ -65,11 +49,6 @@ impl<'a> Spawner<'a> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn spawn_local(&self, future: impl Future<Output = ()> + 'a) {
-        self.executor.spawn(future).detach();
-    }
-
     fn run_until_stalled(&self) {
         while self.executor.try_tick() {}
     }
@@ -102,17 +81,14 @@ async fn setup<E: Example>(title: &str) -> Setup {
         backend,
         Some(&surface),
     ).await.expect("No suitable GPU adapters on the system!");
-
-    //let optional_features = E::optional_features();
-    let adapter_features = adapter.features();
     
     // Device represents a connection to our graphics or compute device
     // It is responsible of most rendering and compute resources
     // Queue is a representation of a queue of work that is submitted to the GPU for execution
     let (device, queue) = adapter.request_device(
         &wgpu::DeviceDescriptor {
-            label: None, // optional_features & adapter_features
-            features: adapter_features, // Add optional features (must be supported by our adapter)
+            label: None,
+            features: adapter.features(), // Set features to adapter features
             limits: adapter.limits() // Sets the limits to the limits of our actual graphics adapter
         },
         None
@@ -158,7 +134,6 @@ fn start<E: Example>(
     let mut last_frame_inst = Instant::now();
     let (mut frame_count, mut accum_time) = (0, 0.0);
 
-    log::info!("Initializing the example...");
     let mut example = E::init(&config, &adapter, &device, &queue);
 
     event_loop.run(move |event, _, control_flow| {
@@ -183,7 +158,6 @@ fn start<E: Example>(
                     },
                 ..
             } => {
-                log::info!("Resizing to {:?}", size);
                 config.width = size.width.max(1);
                 config.height = size.height.max(1);
                 example.resize(&config, &device, &queue);
@@ -236,14 +210,11 @@ fn start<E: Example>(
                     Ok(frame) => frame,
                     Err(_) => {
                         surface.configure(&device, &config);
-                        surface
-                            .get_current_texture()
-                            .expect("Failed to acquire next surface texture!")
+                        surface.get_current_texture().expect("Failed to acquire next surface texture!")
                     }
                 };
-                let view = frame
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                 example.render(&view, &device, &queue, &spawner);
                 frame.present();
