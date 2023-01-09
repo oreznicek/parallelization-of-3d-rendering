@@ -13,7 +13,7 @@ pub fn generate_vertices() -> (Vec<Vertex>, Vec<u16>) {
         let v1: Position = vertex.pos;
         let new_vertex = Vertex {
             _pos: [v1.x, v1.y, v1.z, 1.0],
-            _color: crate::create_color([1, 41, 95, 255]),
+            _tex_coord: [0.5, 0.5],
         };
         vertices.push(new_vertex);
     }

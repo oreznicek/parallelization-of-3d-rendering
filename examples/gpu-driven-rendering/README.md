@@ -5,7 +5,7 @@ This example renders many objects using one indirect draw call.
 ## To Run
 
 ```
-cargo run --example gpu-driven-rendering
+cargo run --release --example gpu-driven-rendering
 ```
 
 ## Screenshots

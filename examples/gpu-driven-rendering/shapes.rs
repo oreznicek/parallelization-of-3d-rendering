@@ -4,14 +4,11 @@ mod cylinder;
 
 use bytemuck::{Pod, Zeroable};
 
-// Constants
-const PI: f32 = 3.14159265359;
-
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct Vertex {
     _pos: [f32; 4],
-    _color: [f32; 4],
+    _tex_coord: [f32; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,10 +18,13 @@ pub enum MeshType {
     Sphere
 }
 
-#[derive(Debug)]
+pub const TEXTURE_TYPE_VARIANTS: usize = 3;
+
+#[derive(Clone, Copy, Debug)]
 pub enum TextureType {
-    Water,
-    Grass
+    Blue,
+    Red,
+    Yellow
 }
 
 pub struct Mesh {
@@ -48,7 +48,7 @@ impl Mesh {
 
 // Batch is a pair of mesh and texture.
 // The number of objects we want to draw from this batch
-// is defined with number of transform matrices in transform_m vector
+// is defined with number of transform matrices in transform_m vector.
 #[repr(C)]
 #[derive(Debug)]
 pub struct Batch {
@@ -57,10 +57,16 @@ pub struct Batch {
     pub transform_m: Vec<glam::Mat4>
 }
 
-fn vertex(pos: [i8; 3], c: [u8; 4]) -> Vertex {
+#[repr(C)]
+pub struct Object {
+    pub transform_m: glam::Mat4,
+    pub texture_type: TextureType,
+}
+
+fn vertex(pos: [i8; 3], tc: [f32; 2]) -> Vertex {
     Vertex {
         _pos: [pos[0] as f32, pos[1] as f32, pos[2] as f32, 1.0],
-        _color: crate::create_color(c),
+        _tex_coord: tc,
     }
 }
 
@@ -84,31 +90,27 @@ pub fn merge_index_vertex_data(meshes: &Vec<&Mesh>) -> (Vec<Vertex>, Vec<u16>) {
     (vertices, indices)
 }
 
-pub fn merge_matrices(objects: &Vec<&Batch>) -> Vec<f32> {
-    let mut matrices: Vec<f32> = Vec::<f32>::new();
-
-    for o in objects {
-        for mat in &o.transform_m {
-            matrices.extend(
-                mat.to_cols_array_2d().concat()
+pub fn get_objects_from_batches(batches: &Vec<&Batch>) -> Vec<Object> {
+    let mut objects = Vec::new();
+    for b in batches {
+        for m in &b.transform_m {
+            objects.push(
+                Object {
+                    texture_type: b.texture,
+                    transform_m: *m
+                }
             );
         }
     }
-
-    matrices
+    objects
 }
 
-pub fn get_object_colors(objects: &Vec<&Batch>) -> Vec<f32> {
-    let mut colors: Vec<f32> = Vec::<f32>::new();
-
+pub fn merge_matrices(objects: &Vec<Object>) -> Vec<f32> {
+    let mut matrices: Vec<f32> = Vec::<f32>::new();
     for o in objects {
-        for mat in &o.transform_m {
-            match o.texture {
-                TextureType::Water => colors.extend(crate::create_color([1, 41, 95, 255])),
-                TextureType::Grass => colors.extend(crate::create_color([52, 140, 49, 255])),
-            }
-        }
+        matrices.extend(
+            &o.transform_m.to_cols_array_2d().concat()
+        );
     }
-
-    colors
+    matrices
 }
