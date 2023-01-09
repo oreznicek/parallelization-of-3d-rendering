@@ -2,7 +2,6 @@ use winit::event_loop::{ EventLoop, ControlFlow };
 use winit::event;
 use winit::event::WindowEvent;
 use std::time::Instant;
-use std::future::Future;
 
 pub trait Example: 'static + Sized {
     fn init(
@@ -132,7 +131,7 @@ fn start<E: Example>(
     surface.configure(&device, &config);
 
     let mut last_frame_inst = Instant::now();
-    let (mut frame_count, mut accum_time) = (0, 0.0);
+    let (mut frame_count, mut accum_time) = (0.0, 0.0);
 
     let mut example = E::init(&config, &adapter, &device, &queue);
 
@@ -146,7 +145,6 @@ fn start<E: Example>(
         match event {
             event::Event::RedrawEventsCleared => {
                 spawner.run_until_stalled();
-
                 window.request_redraw();
             }
             event::Event::WindowEvent {
@@ -195,14 +193,14 @@ fn start<E: Example>(
                 {
                     accum_time += last_frame_inst.elapsed().as_secs_f32();
                     last_frame_inst = Instant::now();
-                    frame_count += 1;
-                    if frame_count == 100 {
+                    frame_count += 1.0;
+                    if frame_count == 100.0 {
                         println!(
-                            "Avg frame time {}ms",
-                            accum_time * 1000.0 / frame_count as f32
+                            "Average fps: {}",
+                            frame_count / accum_time
                         );
                         accum_time = 0.0;
-                        frame_count = 0;
+                        frame_count = 0.0;
                     }
                 }
 
