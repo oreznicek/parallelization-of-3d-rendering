@@ -21,9 +21,3 @@ version = "0.14.0"
 [dependencies.wgt]
 package = "wgpu-types"
 version = "0.14.0"
-
-[[example]]
-name = "triangle"
-
-[[example]]
-name = "cube"
