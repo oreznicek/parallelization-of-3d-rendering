@@ -53,7 +53,7 @@ impl<'a> Spawner<'a> {
     }
 }
 
-async fn setup<E: Example>(title: &str) -> Setup {
+async fn setup(title: &str) -> Setup {
     // Create window builder to build our window
     let event_loop = EventLoop::new();
     let mut builder = winit::window::WindowBuilder::new();
@@ -114,7 +114,7 @@ fn start<E: Example>(
         surface,
         adapter,
         device,
-        queue,
+        queue
     }: Setup,
 ) {
     let spawner = Spawner::new();
@@ -195,10 +195,7 @@ fn start<E: Example>(
                     last_frame_inst = Instant::now();
                     frame_count += 1.0;
                     if frame_count == 100.0 {
-                        println!(
-                            "Average fps: {}",
-                            frame_count / accum_time
-                        );
+                        println!("Average fps: {}", frame_count / accum_time);
                         accum_time = 0.0;
                         frame_count = 0.0;
                     }
@@ -223,7 +220,7 @@ fn start<E: Example>(
 }
 
 pub fn run<E: Example>(title: &str) {
-    let setup = pollster::block_on(setup::<E>(title));
+    let setup = pollster::block_on(setup(title));
     start::<E>(setup);
 }
 
