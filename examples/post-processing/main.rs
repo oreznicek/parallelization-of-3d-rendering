@@ -1,11 +1,12 @@
 
 #[path = "../framework.rs"]
 mod framework;
-//mod effects;
+mod effects;
 
 use wgpu::util::DeviceExt;
 use std::borrow::Cow;
 use bytemuck::{Pod, Zeroable};
+use effects::TintVertex;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -24,6 +25,7 @@ fn vertex(p: [f32; 2], c: [f32; 3]) -> Vertex {
 struct Example {
     vertex_buf: wgpu::Buffer,
     vert_count: u32,
+    tint_vertex_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
 }
 
@@ -42,10 +44,24 @@ impl framework::Example for Example {
             vertex([ 0.5, -0.5], [0.0, 0.0, 1.0])
         ];
 
+        // only vertex positions -> will be used as uv coordinates in post processing tint effect
+        let tint_vertices = [
+            TintVertex { uv_coords: [ 0.0,  0.5] },
+            TintVertex { uv_coords: [-0.5, -0.5] },
+            TintVertex { uv_coords: [ 0.5, -0.5] },
+        ];
+
         // Create vertex buffer
         let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex buffer"),
             contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX
+        });
+
+        // Create tint vertex buffer
+        let tint_vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Tint vertex buffer"),
+            contents: bytemuck::cast_slice(&tint_vertices),
             usage: wgpu::BufferUsages::VERTEX
         });
 
@@ -97,6 +113,7 @@ impl framework::Example for Example {
         Example {
             vertex_buf,
             vert_count: vertices.len() as u32,
+            tint_vertex_buf,
             pipeline,
         }
     }
@@ -122,7 +139,7 @@ impl framework::Example for Example {
         spawner: &framework::Spawner,
     ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        // let tint = effects::tint::Tint::new();
+        let tint = effects::Tint::new(device, queue, view, &self.tint_vertex_buf, self.vert_count, [1.0, 0.0, 0.0, 1.0]);
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -131,12 +148,7 @@ impl framework::Example for Example {
                     view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: true
                     },
                 })],
@@ -147,6 +159,7 @@ impl framework::Example for Example {
             rpass.draw(0..self.vert_count, 0..1);
         }
 
+        tint.resolve_frame();
         queue.submit(Some(encoder.finish()));
     }
 }
