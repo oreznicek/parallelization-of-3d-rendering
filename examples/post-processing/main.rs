@@ -2,11 +2,12 @@
 #[path = "../framework.rs"]
 mod framework;
 mod effects;
+mod helper;
 
 use wgpu::util::DeviceExt;
 use std::borrow::Cow;
 use bytemuck::{Pod, Zeroable};
-use effects::TintVertex;
+use effects::UVVertex;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -46,9 +47,9 @@ impl framework::Example for Example {
 
         // only vertex positions -> will be used as uv coordinates in post processing tint effect
         let tint_vertices = [
-            TintVertex { uv_coords: [ 0.0,  0.5] },
-            TintVertex { uv_coords: [-0.5, -0.5] },
-            TintVertex { uv_coords: [ 0.5, -0.5] },
+            UVVertex { pos: [ 0.0,  0.5], uv_coords: helper::getUVfromPosition([ 0.0,  0.5]) },
+            UVVertex { pos: [-0.0, -0.5], uv_coords: helper::getUVfromPosition([-0.5, -0.5]) },
+            UVVertex { pos: [ 0.0, -0.5], uv_coords: helper::getUVfromPosition([ 0.5, -0.5]) },
         ];
 
         // Create vertex buffer
@@ -136,10 +137,11 @@ impl framework::Example for Example {
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
         spawner: &framework::Spawner,
     ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        let tint = effects::Tint::new(device, queue, view, &self.tint_vertex_buf, self.vert_count, [1.0, 0.0, 0.0, 1.0]);
+        let tint = effects::Tint::new(device, queue, view, config, &self.tint_vertex_buf, self.vert_count, [1.0, 0.0, 0.0, 1.0]);
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -160,6 +162,7 @@ impl framework::Example for Example {
         }
 
         tint.resolve_frame();
+        effects::FinalSample::resolve(device, queue, &tint.output_view, view);
         queue.submit(Some(encoder.finish()));
     }
 }

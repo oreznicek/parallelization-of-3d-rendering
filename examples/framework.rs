@@ -22,6 +22,7 @@ pub trait Example: 'static + Sized {
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
         spawner: &Spawner,
     );
 }
@@ -121,7 +122,7 @@ fn start<E: Example>(
 
     // Configuration of the surface
     let mut config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         format: surface.get_supported_formats(&adapter)[0],
         width: size.width,
         height: size.height,
@@ -214,7 +215,7 @@ fn start<E: Example>(
 
                 let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-                example.render(&view, &device, &queue, &spawner);
+                example.render(&view, &device, &queue, &config, &spawner);
                 frame.present();
             }
             _ => {}

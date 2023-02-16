@@ -17,10 +17,6 @@ var in_texture: texture_2d<f32>;
 @binding(1)
 var texture_sampler: sampler;
 
-@group(0)
-@binding(2)
-var<uniform> tint_color: vec4<f32>;
-
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -30,6 +26,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 }
 
 @fragment
-fn fs_main(vert: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(in_texture, texture_sampler, vert.uv_coords) * tint_color;
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(in_texture, texture_sampler, in.uv_coords);
 }
