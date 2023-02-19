@@ -120,10 +120,17 @@ fn start<E: Example>(
 ) {
     let spawner = Spawner::new();
 
+    let formats = surface.get_supported_formats(&adapter);
+    let mut formats_iter = formats.iter();
+
+    let format = formats_iter
+        .find(|&&x| x == wgpu::TextureFormat::Rgba8Unorm)
+        .expect("Adapter doesn't support this specific texture format");
+
     // Configuration of the surface
     let mut config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        format: surface.get_supported_formats(&adapter)[0],
+        format: *format,
         width: size.width,
         height: size.height,
         present_mode: wgpu::PresentMode::Fifo,
