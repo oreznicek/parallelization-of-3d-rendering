@@ -9,78 +9,40 @@ use wgpu::util::DeviceExt;
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     _pos: [f32; 4],
-    _tex_coord: [f32; 2],
+    _color: [f32; 4],
 }
 
-fn vertex(pos: [i8; 3], tc: [i8; 2]) -> Vertex {
+fn vertex(p: [f32; 3], c: [f32; 3]) -> Vertex {
     Vertex {
-        _pos: [pos[0] as f32, pos[1] as f32, pos[2] as f32, 1.0],
-        _tex_coord: [tc[0] as f32, tc[1] as f32],
+        _pos: [p[0], p[1], p[2], 1.0],
+        _color: [c[0], c[1], c[2], 1.0]
     }
 }
 
 fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
     let vertex_data = [
-        // top (0, 0, 1)
-        vertex([-1, -1, 1], [0, 0]),
-        vertex([1, -1, 1], [1, 0]),
-        vertex([1, 1, 1], [1, 1]),
-        vertex([-1, 1, 1], [0, 1]),
-        // bottom (0, 0, -1)
-        vertex([-1, 1, -1], [1, 0]),
-        vertex([1, 1, -1], [0, 0]),
-        vertex([1, -1, -1], [0, 1]),
-        vertex([-1, -1, -1], [1, 1]),
-        // right (1, 0, 0)
-        vertex([1, -1, -1], [0, 0]),
-        vertex([1, 1, -1], [1, 0]),
-        vertex([1, 1, 1], [1, 1]),
-        vertex([1, -1, 1], [0, 1]),
-        // left (-1, 0, 0)
-        vertex([-1, -1, 1], [1, 0]),
-        vertex([-1, 1, 1], [0, 0]),
-        vertex([-1, 1, -1], [0, 1]),
-        vertex([-1, -1, -1], [1, 1]),
-        // front (0, 1, 0)
-        vertex([1, 1, -1], [1, 0]),
-        vertex([-1, 1, -1], [0, 0]),
-        vertex([-1, 1, 1], [0, 1]),
-        vertex([1, 1, 1], [1, 1]),
-        // back (0, -1, 0)
-        vertex([1, -1, 1], [0, 0]),
-        vertex([-1, -1, 1], [1, 0]),
-        vertex([-1, -1, -1], [1, 1]),
-        vertex([1, -1, -1], [0, 1]),
+        // front
+        vertex([-1.0,  1.0, -1.0], [1.0, 0.0, 0.0]),
+        vertex([ 1.0,  1.0, -1.0], [1.0, 0.0, 0.0]),
+        vertex([-1.0, -1.0, -1.0], [1.0, 0.0, 0.0]),
+        vertex([ 1.0, -1.0, -1.0], [1.0, 0.0, 0.0]),
+        // back
+        vertex([-1.0,  1.0,  1.0], [0.0, 0.0, 1.0]),
+        vertex([ 1.0,  1.0,  1.0], [0.0, 0.0, 1.0]),
+        vertex([-1.0, -1.0,  1.0], [0.0, 0.0, 1.0]),
+        vertex([ 1.0, -1.0,  1.0], [0.0, 0.0, 1.0]), 
     ];
 
     let index_data: &[u16] = &[
-        0, 1, 2, 2, 3, 0, // top
-        4, 5, 6, 6, 7, 4, // bottom
-        8, 9, 10, 10, 11, 8, // right
-        12, 13, 14, 14, 15, 12, // left
-        16, 17, 18, 18, 19, 16, // front
-        20, 21, 22, 22, 23, 20, // back
+        2, 0, 1, 1, 3, 2, // bottom
+        6, 7, 5, 5, 4, 6, // top
+        0, 4, 5, 5, 1, 0, // back
+        2, 3, 7, 7, 6, 2, // front
+        3, 1, 5, 5, 7, 3, // right
+        2, 6, 4, 4, 0, 2, // left
     ];
 
     (vertex_data.to_vec(), index_data.to_vec())
-}
-
-fn create_texels(size: usize) -> Vec<u8> {
-    (0..size * size)
-        .map(|id| {
-            // get high five for recognizing this ;)
-            let cx = 3.0 * (id % size) as f32 / (size - 1) as f32 - 2.0;
-            let cy = 2.0 * (id / size) as f32 / (size - 1) as f32 - 1.0;
-            let (mut x, mut y, mut count) = (cx, cy, 0);
-            while count < 0xFF && x * x + y * y < 4.0 {
-                let old_x = x;
-                x = x * x - y * y + cx;
-                y = 2.0 * old_x * y + cy;
-                count += 1;
-            }
-            count
-        })
-        .collect()
 }
 
 struct Example {
@@ -142,52 +104,13 @@ impl framework::Example for Example {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        sample_type: wgpu::TextureSampleType::Uint,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
-        });
-
-        // Create the texture
-        let size = 256u32;
-        let texels = create_texels(size as usize);
-        let texture_extent = wgpu::Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Uint,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        });
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        queue.write_texture(
-            texture.as_image_copy(),
-            &texels,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(std::num::NonZeroU32::new(size).unwrap()),
-                rows_per_image: None,
-            },
-            texture_extent,
-        );
+        }); 
 
         // Create other resources
         let mx_total = Self::generate_matrix(config.width as f32 / config.height as f32);
@@ -206,10 +129,6 @@ impl framework::Example for Example {
                     binding: 0,
                     resource: uniform_buf.as_entire_binding(),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
             ],
             label: None,
         });
@@ -223,13 +142,15 @@ impl framework::Example for Example {
             array_stride: vertex_size as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
+                // Position
                 wgpu::VertexAttribute {
                     format: wgpu::VertexFormat::Float32x4,
                     offset: 0,
                     shader_location: 0,
                 },
+                // Color
                 wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
+                    format: wgpu::VertexFormat::Float32x4,
                     offset: 4 * 4,
                     shader_location: 1,
                 },
