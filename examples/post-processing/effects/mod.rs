@@ -23,6 +23,7 @@ impl Tint {
     fn init(
         device: &wgpu::Device,
         input_view: &wgpu::TextureView,
+        aspect_ratio_buf: &wgpu::Buffer,
         tint_color: [f32; 4],
     ) -> Tint {
 
@@ -81,6 +82,17 @@ impl Tint {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: wgpu::BufferSize::new(4 * 4),
+                    },
+                    count: None,
+                },
+                // Aspect ratio
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(4),
                     },
                     count: None,
                 }
@@ -164,6 +176,10 @@ impl Tint {
                     binding: 2,
                     resource: tint_color_buf.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: aspect_ratio_buf.as_entire_binding(),
+                }
             ]
         });
 
@@ -179,9 +195,10 @@ impl Tint {
         encoder: &mut wgpu::CommandEncoder,
         input_frame: &wgpu::TextureView,
         output_frame: &wgpu::TextureView,
+        aspect_ratio_buf: &wgpu::Buffer,
         tint_color: [f32; 4],
     ) {
-        let instance = Tint::init(device, input_frame, tint_color);
+        let instance = Tint::init(device, input_frame, aspect_ratio_buf, tint_color);
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -5,27 +5,11 @@ mod effects;
 mod helper;
 
 use wgpu::util::DeviceExt;
-use std::borrow::Cow;
-use bytemuck::{Pod, Zeroable};
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable, Debug)]
-struct Vertex {
-    pos: [f32; 4],
-    color: [f32; 4]
-}
-
-fn vertex(p: [f32; 2], c: [f32; 3]) -> Vertex {
-    Vertex {
-        pos: [p[0], p[1], 0.0, 1.0],
-        color: [c[0], c[1], c[2], 1.0]
-    }
-}
+use std::path::Path;
 
 struct Example {
-    vertex_buf: wgpu::Buffer,
-    vert_count: u32,
-    pipeline: wgpu::RenderPipeline,
+    output_view: wgpu::TextureView,
+    aspect_ratio_buf: wgpu::Buffer,
 }
 
 impl framework::Example for Example {
@@ -33,82 +17,70 @@ impl framework::Example for Example {
         config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
     ) -> Example {
 
-        // vertex0_position, vertex0_color, vertex1_position, ...
-        let vertices = [
-            vertex([ 0.0,  0.5], [1.0, 0.0, 0.0]),
-            vertex([-0.5, -0.5], [0.0, 1.0, 0.0]),
-            vertex([ 0.5, -0.5], [0.0, 0.0, 1.0])
-        ];
+        // Create output texture
+        let texture_path = Path::new("./examples/post-processing/original_scene.png");
+        let texture_bytes_vec = std::fs::read(texture_path).unwrap();
+        let texture_bytes = bytemuck::cast_slice(&texture_bytes_vec);
 
-        // Create vertex buffer
-        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX
+        let texture_image = image::load_from_memory(texture_bytes).unwrap();
+        let texture_rgba = texture_image.to_rgba8();
+
+        use image::GenericImageView;
+        let (texture_width, texture_height) = texture_image.dimensions();
+
+        let texture_extent = wgpu::Extent3d {
+            width: texture_width,
+            height: texture_height,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: texture_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
         });
 
-        // Create shader module
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
-        });
+        let output_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let vertex_size = std::mem::size_of::<Vertex>();
-
-        let vertex_buffers = [wgpu::VertexBufferLayout {
-            array_stride: vertex_size as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: 4 * 4,
-                    shader_location: 1,
-                },
-            ],
-        }];
-
-        // Create render pipeline
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &vertex_buffers
+        queue.write_texture(
+            texture.as_image_copy(),
+            &texture_rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(4*1024),
+                rows_per_image: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(config.format.into())]
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            texture_extent,
+        );
+
+        let aspect_ratio = config.width as f32 / config.height as f32;
+
+        let aspect_ratio_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&[aspect_ratio]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         Example {
-            vertex_buf,
-            vert_count: vertices.len() as u32,
-            pipeline,
+            output_view,
+            aspect_ratio_buf,
         }
     }
 
     fn resize(
         &mut self,
-        _config: &wgpu::SurfaceConfiguration,
+        config: &wgpu::SurfaceConfiguration,
         _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
     ) {
-        // Empty
+        let ratio = config.width as f32 / config.height as f32;
+        queue.write_buffer(&self.aspect_ratio_buf, 0, bytemuck::cast_slice(&[ratio]));
     }
 
     fn update(&mut self, _event: winit::event::WindowEvent) {
@@ -120,49 +92,12 @@ impl framework::Example for Example {
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        config: &wgpu::SurfaceConfiguration,
+        _config: &wgpu::SurfaceConfiguration,
         _spawner: &framework::Spawner,
     ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        // Create output texture
-        let texture_extent = wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        });
-
-        let output_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &output_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: true
-                    },
-                })],
-                depth_stencil_attachment: None
-            });
-            rpass.set_pipeline(&self.pipeline);
-            rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.draw(0..self.vert_count, 0..1);
-        }
-
-
-        effects::Tint::resolve(device, &mut encoder, &output_view, view, [1.0, 0.3, 0.3, 1.0]);
+        effects::Tint::resolve(device, &mut encoder, &self.output_view, view, &self.aspect_ratio_buf, [1.0, 0.0, 0.0, 1.0]);
         queue.submit(Some(encoder.finish()));
     }
 }
