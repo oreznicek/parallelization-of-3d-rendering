@@ -1237,13 +1237,13 @@ name = "paralelizace_3d_renderovani"
 version = "0.1.0"
 dependencies = [
  "async-executor",
+ "bitflags",
  "bytemuck",
  "genmesh",
  "glam",
  "image",
  "pollster",
  "wgpu",
- "wgpu-types",
  "winit",
 ]
 

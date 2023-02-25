@@ -21,14 +21,10 @@ var texture_sampler: sampler;
 @binding(2)
 var<uniform> tint_color: vec4<f32>;
 
-@group(0)
-@binding(3)
-var<uniform> aspect_ratio: f32;
-
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.position = vec4<f32>(in.position * vec2<f32>(1.0 / aspect_ratio, 1.0), 0.0, 1.0);
+    out.position = vec4<f32>(in.position, 0.0, 1.0);
     out.uv_coords = in.uv_coords;
     return out;
 }

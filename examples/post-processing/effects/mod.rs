@@ -3,13 +3,91 @@ use wgpu::util::{DeviceExt};
 use std::borrow::Cow;
 use bytemuck::{Pod, Zeroable};
 use crate::helper::get_uv_from_position;
+use bitflags::bitflags;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
-struct UVVertex {
-    pos: [f32; 2],
-    uv_coords: [f32; 2]
+pub struct UVVertex {
+    pub pos: [f32; 2],
+    pub uv_coords: [f32; 2]
 }
+
+bitflags! {
+    pub struct AllowedEffects: u32 {
+        const TINT = 1 << 0;
+        const CONTOUR = 1 << 1;
+    }
+}
+
+fn nearest_power_of_two(n: u32) -> u32 {
+    let mut bit = 0;
+    let mut power_of_two = 2;
+
+    while n > power_of_two {
+        power_of_two *= 2;
+        bit += 1;
+    }
+
+    bit
+}
+
+impl AllowedEffects {
+    // Based on AllowedEffects count we will generate output textures for each member in post processing chain
+    // textures_to_generete_count = AllowedEffects::count() - 1;
+    // the last chain member will output the result into given frame buffer
+    pub fn count(&self) -> u32 {
+        let num = self.bits;
+        let mut bit: i32 = nearest_power_of_two(num) as i32;
+        let mut count = 0;
+        let mut temp = 0;
+
+        while bit >= 0 {
+            temp = num & (1 << bit);
+            if temp > 0 {
+                count += 1;
+            }
+            bit -= 1;
+        }
+
+        count
+    }
+}
+
+/*struct PostProcessing {
+	tint: Option<Tint>,
+	contour: Option<Contour>,
+}
+
+impl PostProcessing {
+	pub fn init(
+		flags: AllowedEffects,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+		input_frame: &wgpu::TextureView,
+		final_frame: &wgpu::TextureView,
+	) -> PostProcessing {
+		let mut effects_count = 0;
+		let tint, contour;
+
+		if !(flags & AllowedEffects::TINT).is_empty() {
+			tint = Some(Tint::init(device, encoder, input_view, Some(output_view)));
+			effects_count += 1;
+		}
+		else {
+			tint = None;
+		}
+	}
+
+    pub fn resolve(&self) {
+        if Some(tint) = self.tint {
+            tint.resolve();
+        }
+
+        if Some(contour) = self.contour {
+            contour.resolve();
+        }
+    }
+}*/
 
 // This effect will change the tone of the whole scene
 // based on the input color
@@ -23,7 +101,6 @@ impl Tint {
     fn init(
         device: &wgpu::Device,
         input_view: &wgpu::TextureView,
-        aspect_ratio_buf: &wgpu::Buffer,
         tint_color: [f32; 4],
     ) -> Tint {
 
@@ -85,17 +162,6 @@ impl Tint {
                     },
                     count: None,
                 },
-                // Aspect ratio
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(4),
-                    },
-                    count: None,
-                }
             ],
         });
 
@@ -176,10 +242,6 @@ impl Tint {
                     binding: 2,
                     resource: tint_color_buf.as_entire_binding(),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: aspect_ratio_buf.as_entire_binding(),
-                }
             ]
         });
 
@@ -192,13 +254,14 @@ impl Tint {
 
     pub fn resolve(
         device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         input_frame: &wgpu::TextureView,
         output_frame: &wgpu::TextureView,
-        aspect_ratio_buf: &wgpu::Buffer,
         tint_color: [f32; 4],
     ) {
-        let instance = Tint::init(device, input_frame, aspect_ratio_buf, tint_color);
+        let instance = Tint::init(device, input_frame, tint_color);
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -218,5 +281,32 @@ impl Tint {
             rpass.set_vertex_buffer(0, instance.vertex_buf.slice(..));
             rpass.draw(0..6, 0..1);
         }
+
+        queue.submit(Some(encoder.finish()));
     }
 }
+
+// Edge detection using sobel operator to isolate the contours
+/*struct Contour {
+    
+}
+
+impl Contour {
+    fn init(
+        device: &wgpu::Device,
+        input_view: &wgpu::TextureView,
+        aspect_ratio_buf: &wgpu::Buffer,
+    ) -> Contour {
+
+    }
+
+    pub fn resolve(
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        input_frame: &wgpu::TextureView,
+        output_frame: &wgpu::TextureView,
+        aspect_ratio_buf: &wgpu::Buffer,
+    ) {
+        let instance
+    }
+}*/
