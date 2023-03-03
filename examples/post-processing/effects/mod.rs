@@ -1,7 +1,12 @@
+mod tint;
+mod contour;
 
 use wgpu::util::{DeviceExt};
 use std::borrow::Cow;
+use std::vec::Vec;
 use bytemuck::{Pod, Zeroable};
+use tint::Tint;
+use contour::Contour;
 use crate::helper::get_uv_from_position;
 use bitflags::bitflags;
 
@@ -19,6 +24,26 @@ bitflags! {
     }
 }
 
+pub fn create_output_texture_view(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
+    let output_texture_extent = wgpu::Extent3d {
+        width: config.width,
+        height: config.height,
+        depth_or_array_layers: 1,
+    };
+    let output_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: output_texture_extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+    });
+    let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    output_view
+}
+
 fn nearest_power_of_two(n: u32) -> u32 {
     let mut bit = 0;
     let mut power_of_two = 2;
@@ -33,7 +58,7 @@ fn nearest_power_of_two(n: u32) -> u32 {
 
 impl AllowedEffects {
     // Based on AllowedEffects count we will generate output textures for each member in post processing chain
-    // textures_to_generete_count = AllowedEffects::count() - 1;
+    // textures_to_generate_count = AllowedEffects::count() - 1;
     // the last chain member will output the result into given frame buffer
     pub fn count(&self) -> u32 {
         let num = self.bits;
@@ -53,7 +78,8 @@ impl AllowedEffects {
     }
 }
 
-/*struct PostProcessing {
+pub struct PostProcessing {
+    texture_views: Vec<&wgpu::TextureView>,
 	tint: Option<Tint>,
 	contour: Option<Contour>,
 }
@@ -62,251 +88,64 @@ impl PostProcessing {
 	pub fn init(
 		flags: AllowedEffects,
         device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
 		input_frame: &wgpu::TextureView,
 		final_frame: &wgpu::TextureView,
 	) -> PostProcessing {
-		let mut effects_count = 0;
-		let tint, contour;
+		let effects_count = flags.count();
+		let tint, contour; 
+        let texture_views = Vec::new();
+        let mut texture_index = 0;
 
+        if effects_count == 0 {
+            return PostProcessing { texture_views, tint: None, contour: None };
+        }
+
+        for i in 0..effects_count-1 {
+            texture_views.push(&effects::create_output_texture_view(device, config));
+        }
+        texture_views.push(final_frame);
+
+        // Tint
 		if !(flags & AllowedEffects::TINT).is_empty() {
-			tint = Some(Tint::init(device, encoder, input_view, Some(output_view)));
-			effects_count += 1;
+			tint = Some(Tint::init(device, queue, input_view, texture_views[0]));
+            texture_index += 1;
 		}
 		else {
 			tint = None;
 		}
+
+        // Contour
+		if !(flags & AllowedEffects::CONTOUR).is_empty() {
+            if texture_index == 0 {
+                contour = Some(Contour::init(device, queue, input_frame, texture_views[0])) 
+            }
+            else {
+                contour = Some(Contour::init(device, queue, texture_views[texture_index - 1], texture_views[texture_index])) 
+            }
+            texture_index += 1;
+        }
+        else {
+            contour = None;
+        }
+
+        PostProcessing {
+            texture_views,
+            tint,
+            contour,
+        }
 	}
 
     pub fn resolve(&self) {
-        if Some(tint) = self.tint {
+        if let Some(tint) = self.tint {
             tint.resolve();
         }
 
-        if Some(contour) = self.contour {
+        if let Some(contour) = self.contour {
             contour.resolve();
         }
     }
-}*/
-
-// This effect will change the tone of the whole scene
-// based on the input color
-pub struct Tint {
-    vertex_buf: wgpu::Buffer,
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
 }
 
-impl Tint {
-    fn init(
-        device: &wgpu::Device,
-        input_view: &wgpu::TextureView,
-        tint_color: [f32; 4],
-    ) -> Tint {
 
-        let vertices = [
-            UVVertex { pos: [-1.0, -1.0], uv_coords: get_uv_from_position([-1.0, -1.0]) }, // 1
-            UVVertex { pos: [ 1.0, -1.0], uv_coords: get_uv_from_position([ 1.0, -1.0]) }, // 2
-            UVVertex { pos: [ 1.0,  1.0], uv_coords: get_uv_from_position([ 1.0,  1.0]) }, // 3
-            UVVertex { pos: [ 1.0,  1.0], uv_coords: get_uv_from_position([ 1.0,  1.0]) }, // 3
-            UVVertex { pos: [-1.0,  1.0], uv_coords: get_uv_from_position([-1.0,  1.0]) }, // 4
-            UVVertex { pos: [-1.0, -1.0], uv_coords: get_uv_from_position([-1.0, -1.0]) }, // 1
-        ];
-        
-        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let tint_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&tint_color),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-
-        let tint_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("tint.wgsl"))),
-        });
-
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Previous frame texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Texture sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // Tint color -> vec4<f32>
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(4 * 4),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let vertex_size = std::mem::size_of::<UVVertex>();
-
-        let vertex_buffers = [wgpu::VertexBufferLayout {
-            array_stride: vertex_size as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                // Vertex position
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                // UV coordinates
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 4 * 2,
-                    shader_location: 1,
-                },
-            ],
-        }];
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &tint_shader,
-                entry_point: "vs_main",
-                buffers: &vertex_buffers
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &tint_shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
-
-        // Create texture sampler
-        let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(input_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: tint_color_buf.as_entire_binding(),
-                },
-            ]
-        });
-
-        Tint {
-            vertex_buf,
-            pipeline,
-            bind_group,
-        }
-    }
-
-    pub fn resolve(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        input_frame: &wgpu::TextureView,
-        output_frame: &wgpu::TextureView,
-        tint_color: [f32; 4],
-    ) {
-        let instance = Tint::init(device, input_frame, tint_color);
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: output_frame,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: true
-                    }
-                })],
-                depth_stencil_attachment: None,
-            });
-            rpass.set_pipeline(&instance.pipeline);
-            rpass.set_bind_group(0, &instance.bind_group, &[]);
-            rpass.set_vertex_buffer(0, instance.vertex_buf.slice(..));
-            rpass.draw(0..6, 0..1);
-        }
-
-        queue.submit(Some(encoder.finish()));
-    }
-}
-
-// Edge detection using sobel operator to isolate the contours
-/*struct Contour {
-    
-}
-
-impl Contour {
-    fn init(
-        device: &wgpu::Device,
-        input_view: &wgpu::TextureView,
-        aspect_ratio_buf: &wgpu::Buffer,
-    ) -> Contour {
-
-    }
-
-    pub fn resolve(
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        input_frame: &wgpu::TextureView,
-        output_frame: &wgpu::TextureView,
-        aspect_ratio_buf: &wgpu::Buffer,
-    ) {
-        let instance
-    }
-}*/

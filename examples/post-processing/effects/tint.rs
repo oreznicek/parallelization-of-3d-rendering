@@ -1,31 +1,26 @@
 
-#[path = "../framework.rs"]
-mod framework;
-mod effects;
-mod helper;
-
 use wgpu::util::DeviceExt;
-use std::path::Path;
-use std::borrow::Cow;
-use effects::{ AllowedEffects, UVVertex, PostProcessing };
-use helper::get_uv_from_position;
+use super::UVVertex;
 
-struct Example {
+// This effect will change the tone of the whole scene
+// based on the input color
+pub struct Tint {
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    output_view: &wgpu::TextureView,
     vertex_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
-    post_processing: PostProcessing,
-    output_view: Option<wgpu::TextureView>,
-    aspect_ratio_buf: wgpu::Buffer,
 }
 
-impl framework::Example for Example {
-    fn init(
-        config: &wgpu::SurfaceConfiguration,
-        _adapter: &wgpu::Adapter,
+impl Tint {
+    pub fn init(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Example {
+        input_view: &wgpu::TextureView,
+        output_view: &wgpu::TextureView, 
+        tint_color: [f32; 4],
+    ) -> Tint {
 
         let vertices = [
             UVVertex { pos: [-1.0, -1.0], uv_coords: get_uv_from_position([-1.0, -1.0]) }, // 1
@@ -42,16 +37,15 @@ impl framework::Example for Example {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let aspect_ratio = config.width as f32 / config.height as f32;
-        let aspect_ratio_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let tint_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: bytemuck::cast_slice(&[aspect_ratio]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            contents: bytemuck::cast_slice(&tint_color),
+            usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let tint_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("tint.wgsl"))),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -75,17 +69,17 @@ impl framework::Example for Example {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-               // Aspect ratio
+                // Tint color -> vec4<f32>
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(4),
+                        min_binding_size: wgpu::BufferSize::new(4 * 4),
                     },
                     count: None,
-                }
+                },
             ],
         });
 
@@ -120,12 +114,12 @@ impl framework::Example for Example {
             label: None,
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &tint_shader,
                 entry_point: "vs_main",
                 buffers: &vertex_buffers
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &tint_shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8Unorm,
@@ -138,44 +132,6 @@ impl framework::Example for Example {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-
-        // Create input texture
-        let texture_path = Path::new("./examples/post-processing/original_scene.png");
-        let texture_bytes_vec = std::fs::read(texture_path).unwrap();
-        let texture_bytes = bytemuck::cast_slice(&texture_bytes_vec);
-
-        let texture_image = image::load_from_memory(texture_bytes).unwrap();
-        let texture_rgba = texture_image.to_rgba8();
-
-        use image::GenericImageView;
-        let (texture_width, texture_height) = texture_image.dimensions();
-
-        let texture_extent = wgpu::Extent3d {
-            width: texture_width,
-            height: texture_height,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-        });
-        let input_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        queue.write_texture(
-            texture.as_image_copy(),
-            &texture_rgba,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4*1024),
-                rows_per_image: None,
-            },
-            texture_extent,
-        );
 
         // Create texture sampler
         let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -194,7 +150,7 @@ impl framework::Example for Example {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&input_view),
+                    resource: wgpu::BindingResource::TextureView(input_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -202,68 +158,32 @@ impl framework::Example for Example {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: aspect_ratio_buf.as_entire_binding(),
-                }
+                    resource: tint_color_buf.as_entire_binding(),
+                },
             ]
         });
-        
-        let output_view = Some(effects::create_output_texture_view(device, config));
 
-        let flags = AllowedEffects::TINT;
-        let post_processing = effects::PostProcessing::init(
-            flags,
+        Tint {
             device,
             queue,
-            config,
-            input_frame,
-            view,
-        );
-
-        Example {
+            output_view,
             vertex_buf,
             pipeline,
             bind_group,
-            post_processing,
-            output_view,
-            aspect_ratio_buf,
         }
     }
 
-    fn resize(
-        &mut self,
-        config: &wgpu::SurfaceConfiguration,
-        _device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
-        let ratio = config.width as f32 / config.height as f32;
-        queue.write_buffer(&self.aspect_ratio_buf, 0, bytemuck::cast_slice(&[ratio]));
-    }
-
-    fn update(&mut self, _event: winit::event::WindowEvent) {
-        // Empty
-    }
-
-    fn render(
-        &mut self,
-        view: &wgpu::TextureView,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _config: &wgpu::SurfaceConfiguration,
-        _spawner: &framework::Spawner,
-    ) {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    pub fn resolve(&self) {
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: match self.output_view {
-                        Some(output_view) => &output_view,
-                        None => view
-                    },
+                    view: self.output_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,//Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Load,
                         store: true
                     }
                 })],
@@ -275,16 +195,6 @@ impl framework::Example for Example {
             rpass.draw(0..6, 0..1);
         }
 
-        //effects::Tint::resolve(device, queue, &self.output_view, view, [1.0, 0.0, 0.0, 1.0]);
-        //effects::Contour::resolve(device, &mut encoder, &self.output_view, view, &self.aspect_ration_buf);
-        if let Some(output_view) = self.output_view {
-            self.post_processing.resolve();
-        }
-        queue.submit(Some(encoder.finish()));
+        self.queue.submit(Some(encoder.finish()));
     }
-}
-
-// Run the application
-fn main() {
-    framework::run::<Example>("Post processing");
 }
