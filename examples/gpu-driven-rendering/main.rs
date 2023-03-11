@@ -327,8 +327,6 @@ impl framework::Example for Example {
             base_instance += instance_count;
         }
 
-        println!("{:?}", texture_id_count);
-
         // Create one indirect buffer for each texture type
         let mut indirect_bufs = Vec::new();
 
@@ -506,7 +504,7 @@ impl framework::Example for Example {
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        spawner: &framework::Spawner,
+        _spawner: &framework::Spawner,
     ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
@@ -528,13 +526,10 @@ impl framework::Example for Example {
                 })],
                 depth_stencil_attachment: None,
             });
-            rpass.push_debug_group("Prepare data for draw.");
             rpass.set_pipeline(&self.pipeline);
             rpass.set_bind_group(0, &self.bind_group0, &[]);
             rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-            rpass.pop_debug_group();
-            rpass.push_debug_group("Draw!");
 
             for i in 0..TEXTURE_TYPE_VARIANTS {
                 rpass.set_bind_group(1, &self.bind_groups1[i], &[]);
