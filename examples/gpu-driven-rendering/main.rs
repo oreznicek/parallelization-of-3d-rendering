@@ -2,7 +2,7 @@
 mod framework;
 mod shapes;
 
-use shapes::{Object, Batch, Mesh, MeshType, TextureType, TEXTURE_TYPE_VARIANTS};
+use shapes::{Object, Mesh, MeshType, TextureType};
 use std::{borrow::Cow, f32::consts, mem, vec::Vec};
 use std::path::Path;
 use wgpu::util::DeviceExt;
@@ -10,11 +10,10 @@ use wgpu::util::DeviceExt;
 struct Example {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
-    texture_id_count: Vec<u32>,
-    bind_group0: wgpu::BindGroup,
-    bind_groups1: Vec<wgpu::BindGroup>,
+    bind_group: wgpu::BindGroup,
     uniform_buf: wgpu::Buffer,
-    indirect_bufs: Vec<wgpu::Buffer>,
+    indirect_buf: wgpu::Buffer,
+    batches_count: u32,
     pipeline: wgpu::RenderPipeline,
     pipeline_wire: Option<wgpu::RenderPipeline>,
 }
@@ -85,48 +84,51 @@ impl framework::Example for Example {
             offset
         };
 
-        // Create batches from which the objects will be drawn on the screen
-        let cube1 = Batch {
-            m_type: MeshType::Cube,
-            texture: TextureType::Blue,
-            transform_m: vec![
-                glam::Mat4::from_scale_rotation_translation(
+        // Create objects
+        let objects = vec![
+            // Cube - blue
+            Object {
+                transform_m: glam::Mat4::from_scale_rotation_translation(
+                    glam::Vec3::ONE,
+                    glam::Quat::IDENTITY,
+                    glam::Vec3::new(-3.0, 0.0, 0.0),
+                ),
+                m_type: MeshType::Cube,
+                t_type: TextureType::Blue,
+            },
+            // Cylinder - red
+            Object {
+                transform_m: glam::Mat4::from_scale_rotation_translation(
+                    glam::Vec3::ONE,
+                    glam::Quat::IDENTITY,
+                    glam::Vec3::new(0.0, 0.0, 0.0),
+                ),
+                m_type: MeshType::Cylinder,
+                t_type: TextureType::Red,
+            },
+            // Cube - blue
+            Object {
+                transform_m: glam::Mat4::from_scale_rotation_translation(
                     glam::Vec3::ONE,
                     glam::Quat::IDENTITY,
                     glam::Vec3::new(3.0, 0.0, 0.0),
                 ),
-                glam::Mat4::from_scale_rotation_translation(
-                    glam::Vec3::ONE,
-                    glam::Quat::IDENTITY,
-                    glam::Vec3::new(-3.0, 0.0, 0.0),
-                )
-            ]
-        };
-        let cylinder1 = Batch {
-            m_type: MeshType::Cylinder,
-            texture: TextureType::Red,
-            transform_m: vec![
-                glam::Mat4::from_scale_rotation_translation(
-                    glam::Vec3::ONE,
-                    glam::Quat::IDENTITY,
-                    glam::Vec3::new(0.0, 0.0, 0.0),
-                )
-            ]
-        };
-        let sphere1 = Batch {
-            m_type: MeshType::Sphere,
-            texture: TextureType::Yellow,
-            transform_m: vec![
-                glam::Mat4::from_scale_rotation_translation(
+                m_type: MeshType::Cube,
+                t_type: TextureType::Blue,
+            },
+            // Sphere - yellow
+            Object {
+                transform_m: glam::Mat4::from_scale_rotation_translation(
                     glam::Vec3::ONE,
                     glam::Quat::IDENTITY,
                     glam::Vec3::new(6.0, 0.0, 0.0),
-                )
-            ]
-        };
+                ),
+                m_type: MeshType::Sphere,
+                t_type: TextureType::Yellow,
+            },
+        ];
 
-        let batches: Vec<&Batch> = vec![&cube1, &cylinder1, &sphere1];
-        let objects: Vec<Object> = shapes::get_objects_from_batches(&batches);
+        let batches = shapes::get_batches_from_objects(&objects);
 
         // Create one big vertex and index buffer from meshes
         let (vertex_data, index_data) = shapes::merge_index_vertex_data(&meshes);
@@ -151,10 +153,10 @@ impl framework::Example for Example {
         ];
 
         // Create pipeline layout
-        let bind_group_layout0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                // Camera transform (projection + view matrix): mat4x4<f32>
+                // Camera transform (projection * view matrix): mat4x4<f32>
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -165,7 +167,7 @@ impl framework::Example for Example {
                     },
                     count: None,
                 },
-                // Transformation matrices for scene objects: Array of mat4x4<f32>>
+                // Transformation matrices for scene objects: array<mat4x4<f32>>
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -176,9 +178,20 @@ impl framework::Example for Example {
                     },
                     count: None,
                 },
-                // Texture array: Array of texture_2d<f32>
+                // Objects information: array<Object(transform_id, texture_id)>
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new((4*objects.len()) as u64),
+                    },
+                    count: None,
+                },
+                // Texture array: binding_array<texture_2d<f32>>
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -187,34 +200,18 @@ impl framework::Example for Example {
                     },
                     count: core::num::NonZeroU32::new(texture_paths.len() as u32),
                 },
-                // Texture sampler
+                // Texture sampler: sampler
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 }
             ],
         });
-        let bind_group_layout1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // Texture_id: u32
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(4),
-                    },
-                    count: None,
-                },
-            ],
-        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&bind_group_layout0, &bind_group_layout1],
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -286,36 +283,31 @@ impl framework::Example for Example {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Create storage buffer with transformation matrices for individual objects
-        let matrices_bytes = shapes::merge_matrices(&objects);
+        // Create storage buffer with transformation matrices
+        let matrices_vec = shapes::merge_matrices(&batches);
         let matrices_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Storage buffer"),
+            contents: bytemuck::cast_slice(&matrices_vec),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        // Create storage buffer with object informations (transform_id, texture_id)
+        let objects_vec = shapes::merge_objects(&batches);
+        let objects_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Storage Buffer"),
-            contents: bytemuck::cast_slice(&matrices_bytes),
+            contents: bytemuck::cast_slice(&objects_vec),
             usage: wgpu::BufferUsages::STORAGE,
         });
 
         // Create indirect data for each texture type
-        let mut indirect_data: Vec<Vec<u8>> = Vec::new();
-        let mut texture_id_count: Vec<u32> = Vec::new();
-
-        for _i in 0..TEXTURE_TYPE_VARIANTS {
-            indirect_data.push(Vec::new());
-            texture_id_count.push(0);
-        }
+        let mut indirect_data: Vec<u8> = Vec::new();
 
         let mut instance_count;
         let mut base_instance = 0;
-        let mut texture_id;
 
         for b in &batches {
-            match b.texture {
-                TextureType::Blue => texture_id = 0,
-                TextureType::Red => texture_id = 1,
-                TextureType::Yellow => texture_id = 2,
-            }
-            texture_id_count[texture_id] += 1;
             instance_count = b.transform_m.len();
-            indirect_data[texture_id].extend(
+            indirect_data.extend(
                 wgpu::util::DrawIndexedIndirect {
                     vertex_count: index_data_len(b.m_type),
                     instance_count: instance_count as u32,
@@ -327,22 +319,16 @@ impl framework::Example for Example {
             base_instance += instance_count;
         }
 
-        // Create one indirect buffer for each texture type
-        let mut indirect_bufs = Vec::new();
-
-        for i in 0..TEXTURE_TYPE_VARIANTS {
-            indirect_bufs.push(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Indirect Buffer"),
-                    contents: bytemuck::cast_slice(&indirect_data[i]),
-                    usage: wgpu::BufferUsages::INDIRECT,
-                })
-            );
-        }
+        // Create indirect buffer
+        let indirect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Indirect buffer"),
+            contents: bytemuck::cast_slice(&indirect_data),
+            usage: wgpu::BufferUsages::INDIRECT,
+        });
 
         // Create bind group
-        let bind_group0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout0,
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -354,37 +340,19 @@ impl framework::Example for Example {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureViewArray(&texture_views_refs),
+                    resource: objects_buf.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
+                    resource: wgpu::BindingResource::TextureViewArray(&texture_views_refs),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
                     resource: wgpu::BindingResource::Sampler(&texture_sampler),
                 }
             ],
             label: None,
         });
-
-        // Create vector of bind groups 1
-        let mut bind_groups1 = Vec::new();
-
-        for i in 0..TEXTURE_TYPE_VARIANTS {
-            bind_groups1.push(
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &bind_group_layout1,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Vertex Buffer"),
-                                contents: bytemuck::cast_slice(&[i]),
-                                usage: wgpu::BufferUsages::UNIFORM,
-                            }).as_entire_binding(),
-                        }
-                    ],
-                    label: None,
-                })
-            );
-        }
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -474,11 +442,10 @@ impl framework::Example for Example {
         Example {
             vertex_buf,
             index_buf,
-            texture_id_count,
-            bind_group0,
-            bind_groups1,
+            bind_group,
             uniform_buf,
-            indirect_bufs,
+            indirect_buf,
+            batches_count: batches.len() as u32,
             pipeline,
             pipeline_wire,
         }
@@ -527,25 +494,15 @@ impl framework::Example for Example {
                 depth_stencil_attachment: None,
             });
             rpass.set_pipeline(&self.pipeline);
-            rpass.set_bind_group(0, &self.bind_group0, &[]);
+            rpass.set_bind_group(0, &self.bind_group, &[]);
             rpass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buf.slice(..));
-
-            for i in 0..TEXTURE_TYPE_VARIANTS {
-                rpass.set_bind_group(1, &self.bind_groups1[i], &[]);
-                if self.texture_id_count[i] > 0 {
-                    rpass.multi_draw_indexed_indirect(&self.indirect_bufs[i], 0, self.texture_id_count[i]);
-                }
-            }
+            rpass.multi_draw_indexed_indirect(&self.indirect_buf, 0, self.batches_count);
 
             // Pipeline wire
             if let Some(ref pipe) = self.pipeline_wire {
                 rpass.set_pipeline(pipe);
-                for i in 0..TEXTURE_TYPE_VARIANTS {
-                    if self.texture_id_count[i] > 0 {
-                        rpass.multi_draw_indexed_indirect(&self.indirect_bufs[i], 0, self.texture_id_count[i]);
-                    }
-                }
+                rpass.multi_draw_indexed_indirect(&self.indirect_buf, 0, self.batches_count);
             }
         }
 

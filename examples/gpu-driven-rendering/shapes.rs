@@ -18,9 +18,7 @@ pub enum MeshType {
     Sphere
 }
 
-pub const TEXTURE_TYPE_VARIANTS: usize = 3;
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TextureType {
     Blue,
     Red,
@@ -52,15 +50,17 @@ impl Mesh {
 #[repr(C)]
 #[derive(Debug)]
 pub struct Batch {
+    pub transform_m: Vec<glam::Mat4>,
     pub m_type: MeshType,
-    pub texture: TextureType,
-    pub transform_m: Vec<glam::Mat4>
+    pub t_type: TextureType,
 }
 
+// Represents an object from the scene
 #[repr(C)]
 pub struct Object {
     pub transform_m: glam::Mat4,
-    pub texture_type: TextureType,
+    pub m_type: MeshType,
+    pub t_type: TextureType,
 }
 
 fn vertex(pos: [i8; 3], tc: [f32; 2]) -> Vertex {
@@ -90,27 +90,56 @@ pub fn merge_index_vertex_data(meshes: &Vec<&Mesh>) -> (Vec<Vertex>, Vec<u16>) {
     (vertices, indices)
 }
 
-pub fn get_objects_from_batches(batches: &Vec<&Batch>) -> Vec<Object> {
-    let mut objects = Vec::new();
-    for b in batches {
-        for m in &b.transform_m {
-            objects.push(
-                Object {
-                    texture_type: b.texture,
-                    transform_m: *m
-                }
-            );
+pub fn get_batches_from_objects(objects: &Vec<Object>) -> Vec<Batch> {
+    let mut batches = Vec::<Batch>::new();
+
+    for o in objects {
+        let batch = batches.iter_mut().find(|b| b.m_type == o.m_type && b.t_type == o.t_type);
+
+        match batch {
+            Some(x) => x.transform_m.push(o.transform_m),
+            None => batches.push(
+                Batch {
+                    transform_m: vec![o.transform_m],
+                    m_type: o.m_type,
+                    t_type: o.t_type,
+                } 
+            )
         }
     }
-    objects
+
+    batches    
 }
 
-pub fn merge_matrices(objects: &Vec<Object>) -> Vec<f32> {
-    let mut matrices: Vec<f32> = Vec::<f32>::new();
-    for o in objects {
-        matrices.extend(
-            &o.transform_m.to_cols_array_2d().concat()
-        );
+pub fn merge_matrices(batches: &Vec<Batch>) -> Vec<f32> {
+    let mut matrices = Vec::<f32>::new();
+
+    for b in batches {
+        for m in &b.transform_m {
+            matrices.extend(m.to_cols_array());
+        }
     }
+
     matrices
+}
+
+pub fn merge_objects(batches: &Vec<Batch>) -> Vec<u32> {
+    let mut objects = Vec::<u32>::new();
+    let mut transform_id = 0;
+
+    for b in batches {
+        for _m in 0..b.transform_m.len() {
+            objects.push(transform_id);
+            transform_id += 1;
+
+            let texture_id: u32 = match b.t_type {
+                TextureType::Blue => 0,
+                TextureType::Red => 1,
+                TextureType::Yellow => 2,
+            };
+            objects.push(texture_id); // Add objects texture_id
+        }
+    }
+
+    objects
 }

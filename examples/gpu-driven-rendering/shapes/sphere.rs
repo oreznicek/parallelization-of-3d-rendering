@@ -16,7 +16,6 @@ pub fn generate_vertices() -> (Vec<Vertex>, Vec<u16>) {
             _tex_coord: [0.5, 0.5],
         };
         vertices.push(new_vertex);
-        //println!("{:?}", item);
     }
 
     let mut indexes: Vec<u16> = Vec::<u16>::new();
