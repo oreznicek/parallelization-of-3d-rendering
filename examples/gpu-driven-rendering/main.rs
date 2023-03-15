@@ -128,6 +128,7 @@ impl framework::Example for Example {
             },
         ];
 
+        // Create batches from objects
         let batches = shapes::get_batches_from_objects(&objects);
 
         // Create one big vertex and index buffer from meshes
