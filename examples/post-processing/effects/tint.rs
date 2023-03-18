@@ -1,13 +1,12 @@
 
 use wgpu::util::DeviceExt;
+use std::borrow::Cow;
 use super::UVVertex;
+use crate::get_uv_from_position;
 
 // This effect will change the tone of the whole scene
 // based on the input color
 pub struct Tint {
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    output_view: &wgpu::TextureView,
     vertex_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -16,9 +15,7 @@ pub struct Tint {
 impl Tint {
     pub fn init(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         input_view: &wgpu::TextureView,
-        output_view: &wgpu::TextureView, 
         tint_color: [f32; 4],
     ) -> Tint {
 
@@ -82,7 +79,6 @@ impl Tint {
                 },
             ],
         });
-
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&bind_group_layout],
@@ -164,23 +160,20 @@ impl Tint {
         });
 
         Tint {
-            device,
-            queue,
-            output_view,
             vertex_buf,
             pipeline,
             bind_group,
         }
     }
 
-    pub fn resolve(&self) {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    pub fn resolve(&self, device: &wgpu::Device, queue: &wgpu::Queue, output_view: &wgpu::TextureView) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.output_view,
+                    view: output_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -195,6 +188,6 @@ impl Tint {
             rpass.draw(0..6, 0..1);
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
     }
 }

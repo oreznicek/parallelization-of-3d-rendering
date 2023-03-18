@@ -207,24 +207,26 @@ impl framework::Example for Example {
             ]
         });
         
-        let output_view = Some(effects::create_output_texture_view(device, config));
+        let output_view = effects::create_output_texture_view(device, config);
 
-        let flags = AllowedEffects::TINT;
+        let flags = AllowedEffects::CONTOUR;
         let post_processing = effects::PostProcessing::init(
             flags,
             device,
             queue,
             config,
-            input_frame,
-            view,
+            &output_view,
         );
+        // Passnout final_frame do resolve metody
+
+        println!("{} {}", flags.highest_bit(), AllowedEffects::CONTOUR.bits());
 
         Example {
             vertex_buf,
             pipeline,
             bind_group,
             post_processing,
-            output_view,
+            output_view: Some(output_view),
             aspect_ratio_buf,
         }
     }
@@ -257,8 +259,8 @@ impl framework::Example for Example {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: match self.output_view {
-                        Some(output_view) => &output_view,
+                    view: match &self.output_view {
+                        Some(output_view) => output_view,
                         None => view
                     },
                     resolve_target: None,
@@ -277,8 +279,8 @@ impl framework::Example for Example {
 
         //effects::Tint::resolve(device, queue, &self.output_view, view, [1.0, 0.0, 0.0, 1.0]);
         //effects::Contour::resolve(device, &mut encoder, &self.output_view, view, &self.aspect_ration_buf);
-        if let Some(output_view) = self.output_view {
-            self.post_processing.resolve();
+        if let Some(output_view) = &self.output_view {
+            self.post_processing.resolve(device, queue, view);
         }
         queue.submit(Some(encoder.finish()));
     }
