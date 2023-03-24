@@ -33,12 +33,6 @@ impl Contour {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let window_resolution_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&[config.width, config.height]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-
         let contour_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("contour.wgsl"))),
@@ -63,17 +57,6 @@ impl Contour {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                // SurfaceConfiguration: vec2<u32> -> [width, height]
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(4 * 2),
-                    },
                     count: None,
                 },
             ]
@@ -150,10 +133,6 @@ impl Contour {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&texture_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: window_resolution_buf.as_entire_binding(),
                 },
             ]
         });
