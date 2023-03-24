@@ -10,4 +10,4 @@ cargo run --release --example triangle
 
 ## Screenshots
 
-![Cube example](./triangle.png)
+![Triangle example](./screenshot.png)

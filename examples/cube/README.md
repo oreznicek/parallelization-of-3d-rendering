@@ -10,4 +10,4 @@ cargo run --release --example cube
 
 ## Screenshots
 
-![Cube example](./cube.png)
+![Cube example](./screenshot.png)
