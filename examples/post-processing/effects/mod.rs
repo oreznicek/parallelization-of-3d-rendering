@@ -5,7 +5,6 @@ use std::vec::Vec;
 use bytemuck::{Pod, Zeroable};
 use tint::Tint;
 use contour::Contour;
-use bitflags::bitflags;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -14,64 +13,40 @@ pub struct UVVertex {
     pub uv_coords: [f32; 2]
 }
 
-bitflags! {
-    pub struct AllowedEffects: u32 {
-        const TINT = 1 << 0;
-        const CONTOUR = 1 << 1;
-    }
+// Defines the type of the post-processing effect and encapsulates some additional parameters
+#[derive(Clone, Copy, Debug)]
+pub enum EffectType {
+    Tint(f32, f32, f32, f32), // RGBA
+    Contour
 }
 
-fn nearest_power_of_two(n: u32) -> (u32, u32) {
-    let mut bit = 0;
-    let mut power_of_two = 2;
-
-    if n <= power_of_two {
-        return (power_of_two, n);
-    }
-
-    while n > power_of_two {
-        power_of_two *= 2;
-        bit += 1;
-    }
-
-    (power_of_two, bit)
+pub trait Effect {
+    // Initializes the resources for the effect
+    fn init(
+        device: &wgpu::Device,
+        input_view: &wgpu::TextureView,
+        effect_type: EffectType,
+    ) -> Self where Self: Sized;
+    // Resolves the input frame and returns the result into output_view
+    fn resolve(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output_view: &wgpu::TextureView,
+    );
 }
 
-impl AllowedEffects {
-    // Based on AllowedEffects count we will generate output textures for each member in post processing chain
-    // textures_to_generate_count = AllowedEffects::count() - 1;
-    // the last chain member will output the result into given frame buffer
-    pub fn count(&self) -> u32 {
-        let num = self.bits;
-        let (power_of_two, b) = nearest_power_of_two(num);
-        println!("{} {}", power_of_two, b);
-        let mut bit: i32 = b as i32;
-        let mut count = 0;
-        let mut temp = 0;
+pub fn create_output_texture_view(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+) -> wgpu::TextureView {
 
-        while bit >= 0 {
-            temp = num & (1 << bit);
-            if temp > 0 {
-                count += 1;
-            }
-            bit -= 1;
-        }
-
-        count
-    }
-
-    pub fn highest_bit(&self) -> u32 {
-        let (power_of_two, bit) = nearest_power_of_two(self.bits);
-        power_of_two
-    }
-}
-
-pub fn create_output_texture_view(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
     let output_texture_extent = wgpu::Extent3d {
         width: config.width,
         height: config.height,
         depth_or_array_layers: 1,
     };
+
     let output_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: output_texture_extent,
@@ -86,89 +61,111 @@ pub fn create_output_texture_view(device: &wgpu::Device, config: &wgpu::SurfaceC
     output_view
 }
 
+// Creates specified number of texture views
+pub fn create_output_texture_views(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    count: usize,
+) -> Vec<wgpu::TextureView> {
+    let mut output_views = Vec::new();
+
+    for _i in 0..count {
+        output_views.push(create_output_texture_view(device, config));
+    }
+
+    output_views
+}
+
 pub struct PostProcessing {
-    flags: AllowedEffects,
-    texture_views: Vec<wgpu::TextureView>,
-	tint: Option<Tint>,
-	contour: Option<Contour>,
+    effects: Vec<Box<dyn Effect>>, // Post-processing chain
+    texture_views: Vec<wgpu::TextureView>, // Swap chain
 }
 
 impl PostProcessing {
 	pub fn init(
-		flags: AllowedEffects,
+		chain: &Vec<EffectType>,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         config: &wgpu::SurfaceConfiguration,
 		input_frame: &wgpu::TextureView,
 	) -> PostProcessing {
-		let effects_count = flags.count();
-		let tint;
-        let contour; 
+		let effects_count = chain.len();
+        let mut effects: Vec<Box<dyn Effect>> = Vec::new();
         let mut texture_views = Vec::new();
-        let mut texture_index = 0;
 
         if effects_count == 0 {
-            return PostProcessing { flags, texture_views, tint: None, contour: None };
+            return PostProcessing { effects, texture_views };
         }
 
-        for i in 0..effects_count-1 {
-            texture_views.push(create_output_texture_view(device, config));
+        // 0 effects -> no need for output textures
+        // 1 effect -> no need for output textures
+        // 2 effects -> 1 texture
+        // more effects -> swap chain (2 textures)
+        match effects_count {
+            2 => texture_views.push(create_output_texture_view(device, config)),
+            _ => texture_views.extend(create_output_texture_views(device, config, 2))
         }
-        //texture_views.push(final_frame);
 
-        // Tint
-		if !(flags & AllowedEffects::TINT).is_empty() {
-			tint = Some(Tint::init(device, input_frame, [1.0, 0.0, 0.0, 1.0]));
-            texture_index += 1;
-		}
-		else {
-			tint = None;
-		}
+        let mut in_texture_id = -1;
+        let mut in_texture: &wgpu::TextureView;
 
+        for i in 0..chain.len() {
+            // Limit swap chain to two buffers
+            if in_texture_id > 1 {
+                in_texture_id = 0;
+            }
 
-        // Contour
-		if !(flags & AllowedEffects::CONTOUR).is_empty() {
-            if texture_index == 0 {
-                contour = Some(Contour::init(device, input_frame, config)) 
+            if in_texture_id < 0 {
+                in_texture = input_frame;
             }
             else {
-                contour = Some(Contour::init(device, &texture_views[texture_index - 1], config)) 
+                in_texture = &texture_views[in_texture_id as usize];
             }
-            texture_index += 1;
-        }
-        else {
-            contour = None;
+
+            match chain[i] {
+                EffectType::Tint(_, _, _, _) => {
+                    effects.push(
+                        Box::new(Tint::init(device, in_texture, chain[i]))
+                    );
+                },
+                EffectType::Contour => {
+                    effects.push(
+                        Box::new(Contour::init(device, in_texture, chain[i]))
+                    );
+                }
+            }
+
+            in_texture_id += 1;
         }
 
         PostProcessing {
-            flags,
+            effects,
             texture_views,
-            tint,
-            contour,
         }
 	}
 
-    pub fn resolve(&self, device: &wgpu::Device, queue: &wgpu::Queue, final_frame: &wgpu::TextureView) {
-        let mut texture_index = 0;
+    pub fn resolve(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output_frame: &wgpu::TextureView, // frame buffer
+    ) {
+        let effects_count = self.effects.len();
+        let mut out_texture_id = 0;
 
-        if let Some(tint) = &self.tint {
-            if self.flags.highest_bit() == AllowedEffects::TINT.bits {
-                tint.resolve(device, queue, final_frame);
+        for i in 0..effects_count {
+            // Limit swap chain to two buffers
+            if out_texture_id > 1 {
+                out_texture_id = 0;
+            }
+
+            if i == effects_count-1 {
+                (*self.effects[i]).resolve(device, queue, output_frame);
             }
             else {
-                tint.resolve(device, queue, &self.texture_views[texture_index]);
-                texture_index += 1;
+                (*self.effects[i]).resolve(device, queue, &self.texture_views[out_texture_id]);
             }
-        }
 
-        if let Some(contour) = &self.contour {
-            if self.flags.highest_bit() == AllowedEffects::CONTOUR.bits {
-                contour.resolve(device, queue, final_frame);
-            }
-            else {
-                contour.resolve(device, queue, &self.texture_views[texture_index]);
-                texture_index += 1;
-            }
+            out_texture_id += 1;
         }
     }
 }

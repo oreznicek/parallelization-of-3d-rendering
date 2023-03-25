@@ -1,7 +1,7 @@
 
 use wgpu::util::DeviceExt;
 use std::borrow::Cow;
-use super::UVVertex;
+use super::{UVVertex, EffectType};
 use crate::get_uv_from_position;
 
 // Edge detection using sobel operator to isolate the contours
@@ -11,11 +11,11 @@ pub struct Contour {
    bind_group: wgpu::BindGroup,
 }
 
-impl Contour {
-    pub fn init(
+impl super::Effect for Contour {
+    fn init(
         device: &wgpu::Device,
         input_view: &wgpu::TextureView,
-        config: &wgpu::SurfaceConfiguration,
+        _effect_type: EffectType,
     ) -> Contour {
 
         let vertices = [
@@ -144,7 +144,12 @@ impl Contour {
         }
     }
 
-    pub fn resolve(&self, device: &wgpu::Device, queue: &wgpu::Queue, output_view: &wgpu::TextureView) {
+    fn resolve(
+        &self, 
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output_view: &wgpu::TextureView
+    ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {

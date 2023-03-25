@@ -7,7 +7,7 @@ mod helper;
 use wgpu::util::DeviceExt;
 use std::path::Path;
 use std::borrow::Cow;
-use effects::{ AllowedEffects, UVVertex, PostProcessing };
+use effects::{ UVVertex, PostProcessing, EffectType };
 use helper::get_uv_from_position;
 
 struct Example {
@@ -127,11 +127,7 @@ impl framework::Example for Example {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[Some(config.format.into())],
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
@@ -207,19 +203,17 @@ impl framework::Example for Example {
             ]
         });
         
+        // Output texture for main scene and input for post-processing
         let output_view = effects::create_output_texture_view(device, config);
 
-        let flags = AllowedEffects::CONTOUR;
+        // Initialize post processing
+        let pp_chain = vec![EffectType::Contour, EffectType::Tint(0.2, 0.4, 0.8, 1.0)];
         let post_processing = effects::PostProcessing::init(
-            flags,
+            &pp_chain,
             device,
-            queue,
             config,
             &output_view,
         );
-        // Passnout final_frame do resolve metody
-
-        println!("{} {}", flags.highest_bit(), AllowedEffects::CONTOUR.bits());
 
         Example {
             vertex_buf,
@@ -264,7 +258,7 @@ impl framework::Example for Example {
                     },
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,//Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: true
                     }
                 })],
@@ -276,16 +270,14 @@ impl framework::Example for Example {
             rpass.draw(0..6, 0..1);
         }
 
-        //effects::Tint::resolve(device, queue, &self.output_view, view, [1.0, 0.0, 0.0, 1.0]);
-        //effects::Contour::resolve(device, &mut encoder, &self.output_view, view, &self.aspect_ration_buf);
-        if let Some(output_view) = &self.output_view {
+        if let Some(_) = &self.output_view {
             self.post_processing.resolve(device, queue, view);
         }
+        
         queue.submit(Some(encoder.finish()));
     }
 }
 
-// Run the application
 fn main() {
     framework::run::<Example>("Post processing");
 }

@@ -1,10 +1,10 @@
 
 use wgpu::util::DeviceExt;
 use std::borrow::Cow;
-use super::UVVertex;
+use super::{UVVertex, EffectType};
 use crate::get_uv_from_position;
 
-// This effect will change the tone of the whole scene
+// This effect will change the tone of the entire scene
 // based on the input color
 pub struct Tint {
     vertex_buf: wgpu::Buffer,
@@ -12,11 +12,11 @@ pub struct Tint {
     bind_group: wgpu::BindGroup,
 }
 
-impl Tint {
-    pub fn init(
+impl super::Effect for Tint {
+    fn init(
         device: &wgpu::Device,
         input_view: &wgpu::TextureView,
-        tint_color: [f32; 4],
+        effect_type: EffectType
     ) -> Tint {
 
         let vertices = [
@@ -33,6 +33,16 @@ impl Tint {
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
+
+        // Get tint color from effect_type
+        let tint_color: [f32; 4];
+        
+        if let EffectType::Tint(r, g, b, a) = effect_type {
+            tint_color = [r, g, b, a];
+        }
+        else {
+            panic!("Different EffectType value was expected.")
+        }
 
         let tint_color_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -166,7 +176,12 @@ impl Tint {
         }
     }
 
-    pub fn resolve(&self, device: &wgpu::Device, queue: &wgpu::Queue, output_view: &wgpu::TextureView) {
+    fn resolve(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output_view: &wgpu::TextureView
+    ) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
