@@ -1,10 +1,10 @@
 
 use wgpu::util::DeviceExt;
 use std::borrow::Cow;
-use super::{UVVertex, EffectType};
-use crate::get_uv_from_position;
+use super::EffectType;
+use crate::{UVVertex, get_uv_from_position};
 
-// Edge detection using sobel operator to isolate the contours
+// Preforms edge detection using sobel operator to isolate the contours
 pub struct Contour {
    vertex_buf: wgpu::Buffer,
    pipeline: wgpu::RenderPipeline,

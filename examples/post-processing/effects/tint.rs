@@ -1,11 +1,10 @@
 
 use wgpu::util::DeviceExt;
 use std::borrow::Cow;
-use super::{UVVertex, EffectType};
-use crate::get_uv_from_position;
+use super::EffectType;
+use crate::{UVVertex, get_uv_from_position};
 
-// This effect will change the tone of the entire scene
-// based on the input color
+// Tint effect changes the tone of the entire scene based on the input color
 pub struct Tint {
     vertex_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,

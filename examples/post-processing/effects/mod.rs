@@ -1,17 +1,13 @@
 mod tint;
 mod contour;
 
-use std::vec::Vec;
-use bytemuck::{Pod, Zeroable};
 use tint::Tint;
 use contour::Contour;
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable, Debug)]
-pub struct UVVertex {
-    pub pos: [f32; 2],
-    pub uv_coords: [f32; 2]
-}
+use std::vec::Vec;
+use std::iter::IntoIterator;
+use std::ops::Index;
+use crate::helper::{create_output_texture_view, create_output_texture_views};
 
 // Defines the type of the post-processing effect and encapsulates some additional parameters
 #[derive(Clone, Copy, Debug)]
@@ -20,6 +16,7 @@ pub enum EffectType {
     Contour
 }
 
+// Represents the post-processing effect
 pub trait Effect {
     // Initializes the resources for the effect
     fn init(
@@ -36,59 +33,61 @@ pub trait Effect {
     );
 }
 
-pub fn create_output_texture_view(
-    device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
-) -> wgpu::TextureView {
-
-    let output_texture_extent = wgpu::Extent3d {
-        width: config.width,
-        height: config.height,
-        depth_or_array_layers: 1,
-    };
-
-    let output_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: output_texture_extent,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-    });
-    let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    output_view
+// Wrapper for Vec<EffectType>
+// Specifies the order in which the effects will be executed
+pub struct PostProcessingChain {
+    inner: Vec<EffectType>
 }
 
-// Creates specified number of texture views
-pub fn create_output_texture_views(
-    device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
-    count: usize,
-) -> Vec<wgpu::TextureView> {
-    let mut output_views = Vec::new();
-
-    for _i in 0..count {
-        output_views.push(create_output_texture_view(device, config));
+impl PostProcessingChain {
+    pub fn new() -> Self {
+        Self {
+            inner: Vec::new()
+        }
     }
 
-    output_views
+    pub fn add_effect(&mut self, effect_type: EffectType) {
+        self.inner.push(effect_type);
+    }
+
+    pub fn effects_count(&self) -> usize {
+        self.inner.len()
+    }
 }
 
+// Make the struct iterable
+impl IntoIterator for PostProcessingChain {
+    type Item = EffectType;
+    type IntoIter = <Vec<EffectType> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+// Make the struct indexable
+impl Index<usize> for PostProcessingChain {
+    type Output = EffectType;
+
+    fn index(&self, index: usize) -> &EffectType {
+        &self.inner[index]
+    }
+}
+
+// Provides access to post-processing effects and handles the swap chain mechanism
 pub struct PostProcessing {
-    effects: Vec<Box<dyn Effect>>, // Post-processing chain
+    effects: Vec<Box<dyn Effect>>, // Effect instances (in order of post-processing chain)
     texture_views: Vec<wgpu::TextureView>, // Swap chain
 }
 
 impl PostProcessing {
 	pub fn init(
-		chain: &Vec<EffectType>,
+		chain: &PostProcessingChain,
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
 		input_frame: &wgpu::TextureView,
 	) -> PostProcessing {
-		let effects_count = chain.len();
+		let effects_count = chain.effects_count();
         let mut effects: Vec<Box<dyn Effect>> = Vec::new();
         let mut texture_views = Vec::new();
 
@@ -96,9 +95,9 @@ impl PostProcessing {
             return PostProcessing { effects, texture_views };
         }
 
-        // 0 effects -> no need for output textures
-        // 1 effect -> no need for output textures
-        // 2 effects -> 1 texture
+        // zero effects -> no need for output textures
+        // one effect -> no need for output textures
+        // two effects -> 1 texture
         // more effects -> swap chain (2 textures)
         match effects_count {
             2 => texture_views.push(create_output_texture_view(device, config)),
@@ -108,7 +107,7 @@ impl PostProcessing {
         let mut in_texture_id = -1;
         let mut in_texture: &wgpu::TextureView;
 
-        for i in 0..chain.len() {
+        for i in 0..effects_count {
             // Limit swap chain to two buffers
             if in_texture_id > 1 {
                 in_texture_id = 0;

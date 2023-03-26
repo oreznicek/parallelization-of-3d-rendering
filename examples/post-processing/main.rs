@@ -7,8 +7,17 @@ mod helper;
 use wgpu::util::DeviceExt;
 use std::path::Path;
 use std::borrow::Cow;
-use effects::{ UVVertex, PostProcessing, EffectType };
+use bytemuck::{Pod, Zeroable};
+use effects::{PostProcessing, PostProcessingChain, EffectType};
 use helper::get_uv_from_position;
+
+// Vertex with position and texture coordinates
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub struct UVVertex {
+    pub pos: [f32; 2],
+    pub uv_coords: [f32; 2]
+}
 
 struct Example {
     vertex_buf: wgpu::Buffer,
@@ -204,16 +213,14 @@ impl framework::Example for Example {
         });
         
         // Output texture for main scene and input for post-processing
-        let output_view = effects::create_output_texture_view(device, config);
+        let output_view = helper::create_output_texture_view(device, config);
 
         // Initialize post processing
-        let pp_chain = vec![EffectType::Contour, EffectType::Tint(0.2, 0.4, 0.8, 1.0)];
-        let post_processing = effects::PostProcessing::init(
-            &pp_chain,
-            device,
-            config,
-            &output_view,
-        );
+        let mut pp_chain = PostProcessingChain::new();
+        pp_chain.add_effect(EffectType::Contour);
+        pp_chain.add_effect(EffectType::Tint(0.2, 0.4, 0.8, 1.0));
+
+        let post_processing = PostProcessing::init(&pp_chain, device, config, &output_view);
 
         Example {
             vertex_buf,
