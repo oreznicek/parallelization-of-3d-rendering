@@ -10,11 +10,10 @@ This repository contains my secondary school graduation thesis, which explores t
 
 The project is divided into multiple examples, each of which showcases a unique rendering technique. The first two examples were specifically created for educational purposes, while the rest demonstrate practical implementations of the rendering techniques.
 
-
  1. **triangle**
  2. **cube** (from WGPU)
  3. **gpu-driven-rendering**
- 4. **post-processing** (in progress ...)
+ 4. **post-processing**
 
 The entire project is based on [WGPU GitHub examples](https://github.com/gfx-rs/wgpu/tree/master/wgpu/examples).
 
@@ -40,5 +39,5 @@ Dotrix website: https://dotrix.rs/
 
 ## Contacts
 
- - LinkedIn: [Oliver Řezníček](https://www.linkedin.com/in/oliver-%C5%99ezn%C3%AD%C4%8Dek-40061020a/)
+ - LinkedIn: [Oliver Řezníček](https://www.linkedin.com/in/oliver-reznicek)
  - Lowenware: https://lowenware.com/ 
